@@ -1,5 +1,5 @@
 (ns cl
-  (:use [clojure.contrib.duck-streams :only (slurp*)]))
+  (:use [clojure.contrib.duck-streams :only (slurp* append-spit)]))
 
 (defn get-post-urls [url]                                                                                                                                                                                  
   (map #(str "http://craigslist.com" (second %1))
@@ -55,14 +55,15 @@
   (defn add-to-post-queue [q post]
     (cons post q))
   (defn process-post [_ post-url]
-    (. java.lang.Thread sleep (rand 30000))
+    (. java.lang.Thread sleep (rand 1000))
     (send post-queue add-to-post-queue
 	  (extract-post-data post-url)))
   (defn process-category [_ category-url]
-    (. java.lang.Thread sleep (rand 10000))
+    (. java.lang.Thread sleep (rand 1000))
     (doseq [url (get-post-urls category-url)]
       (send (agent-from-pool post-pool) process-post url)))
   (doseq [category-url categories]
+    (printf "retrieve " category-url "\n")
     (send (agent-from-pool category-pool) 
 	  process-category category-url)))
 
@@ -80,19 +81,11 @@
     (list))
   (send post-queue dequeue-posts filters))
 
-
 (def categories '("http://sfbay.craigslist.org/eng/"))
-(def filters (list (make-filter "erlang" '("erlang"))
+(def filters (list (make-filter "simple" '("the"))
+		   (make-filter "erlang" '("erlang"))
 		   (make-filter "django" '("python" "django"))
 		   (make-filter "php" '("php"))))
-
-(def category-poller (agent 600000))
-(defn category-poll-fn [delay categories]
-  (retrieve-categories categories)
-  (. java.lang.Thread sleep delay)
-  (send category-poller category-poll-fn categories)
-  delay)
-(send category-poller category-poll-fn categories)
 
 (def post-poller (agent 5000))
 (defn post-poll-fn [delay filters]
@@ -102,3 +95,4 @@
   delay)
 (send post-poller post-poll-fn filters)
 
+(retrieve-categories categories)
