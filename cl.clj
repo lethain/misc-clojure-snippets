@@ -1,8 +1,8 @@
 (ns cl
-  (:use [clojure.contrib.duck-streams :only (append-spit slurp*)]))
+  (:use [clojure.contrib.duck-streams :only (slurp*)]))
 
 (defn get-post-urls [url]                                                                                                                                                                                  
-  (map #(second %1) 
+  (map #(str "http://craigslist.com" (second %1))
        (re-seq #"<p><a href=\"([a-zA-Z0-9/.]+)\">.*?</p>" (slurp* url))))
 
 (defn extract-post-data [url]
@@ -27,8 +27,8 @@
   (let [url (nth post 0)
 	title (nth post 1)
 	body (nth post 2)]
-    (or (has-keys? (tokenize title) filter)
-	(has-keys? (tokenize body) filter))))
+    (or (has-keys? (tokenize title) (:tags filter))
+	(has-keys? (tokenize body) (:tags filter)))))
 
 (defn make-filter [name tags]
   {:tags tags :file (agent (str name ".posts"))})
@@ -55,16 +55,50 @@
   (defn add-to-post-queue [q post]
     (cons post q))
   (defn process-post [_ post-url]
+    (. java.lang.Thread sleep (rand 30000))
     (send post-queue add-to-post-queue
-	  (. java.lang.Thread sleep (rand 10000))
 	  (extract-post-data post-url)))
   (defn process-category [_ category-url]
     (. java.lang.Thread sleep (rand 10000))
     (doseq [url (get-post-urls category-url)]
       (send (agent-from-pool post-pool) process-post url)))
   (doseq [category-url categories]
-    (send (agent-from-pool category-pool) process-category category-url)))
+    (send (agent-from-pool category-pool) 
+	  process-category category-url)))
 
-(prn retrieve-categories '("http://sfbay.craigslist.org/eng/")
-(. java.lang.Thread sleep 20000)
-(prn @post-queue)
+(def filter-pool (make-agent-pool "filter" 5))
+
+(defn process-posts [filters]
+  (defn filter-post [_ post filters]
+    (doseq [filt filters]
+      (if (filter-post? filt post)
+	(save-post filt post)
+	nil)))
+  (defn dequeue-posts [posts filters]
+    (doseq [post posts]
+      (send (agent-from-pool filter-pool) filter-post post filters))
+    (list))
+  (send post-queue dequeue-posts filters))
+
+
+(def categories '("http://sfbay.craigslist.org/eng/"))
+(def filters (list (make-filter "erlang" '("erlang"))
+		   (make-filter "django" '("python" "django"))
+		   (make-filter "php" '("php"))))
+
+(def category-poller (agent 600000))
+(defn category-poll-fn [delay categories]
+  (retrieve-categories categories)
+  (. java.lang.Thread sleep delay)
+  (send category-poller category-poll-fn categories)
+  delay)
+(send category-poller category-poll-fn categories)
+
+(def post-poller (agent 5000))
+(defn post-poll-fn [delay filters]
+  (process-posts filters)
+  (. java.lang.Thread sleep delay)
+  (send post-poller post-poll-fn filters)
+  delay)
+(send post-poller post-poll-fn filters)
+
