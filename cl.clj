@@ -6,12 +6,12 @@
        (re-seq #"<p><a href=\"([a-zA-Z0-9/.]+)\">.*?</p>" (slurp* url))))
 
 (defn extract-post-data [url]
-  (defn strip-html-tags [string]
-    (.replaceAll (.replaceAll string "<.*?>" " ") "[\t\n\r ]+" " "))
+  (letfn [(strip-html-tags [string]
+    (.replaceAll (.replaceAll string "<.*?>" " ") "[\t\n\r ]+" " "))]
   (let [html (.replaceAll (slurp* url) "[\t\n\r]+" " ")]
     (list url
 	  (second (re-find #"<h2>(.*?)</h2>" html))
-	  (strip-html-tags (second (re-find #"<div id=\"userbody\">(.*?)</div>" html))))))
+	  (strip-html-tags (second (re-find #"<div id=\"userbody\">(.*?)</div>" html)))))))
 
 (defn tokenize [str]
   (reduce #(assoc %1 %2 (+ (get %1 %2 0) 1))
@@ -52,34 +52,34 @@
 (def post-queue (agent (list)))
 
 (defn retrieve-categories [categories]
-  (defn add-to-post-queue [q post]
-    (cons post q))
-  (defn process-post [_ post-url]
-    (. java.lang.Thread sleep (rand 1000))
-    (send post-queue add-to-post-queue
-	  (extract-post-data post-url)))
-  (defn process-category [_ category-url]
-    (. java.lang.Thread sleep (rand 1000))
-    (doseq [url (get-post-urls category-url)]
-      (send (agent-from-pool post-pool) process-post url)))
-  (doseq [category-url categories]
-    (printf "retrieve " category-url "\n")
-    (send (agent-from-pool category-pool) 
-	  process-category category-url)))
+  (letfn [(add-to-post-queue [q post]
+			     (cons post q))
+	  (process-post [_ post-url]
+			(. java.lang.Thread sleep (rand 1000))
+			(send post-queue add-to-post-queue
+			      (extract-post-data post-url)))
+	  (process-category [_ category-url]
+			    (. java.lang.Thread sleep (rand 1000))
+			    (doseq [url (get-post-urls category-url)]
+			      (send (agent-from-pool post-pool) process-post url)))]
+    (doseq [category-url categories]
+      (printf "retrieve " category-url "\n")
+      (send (agent-from-pool category-pool) 
+	    process-category category-url))))
 
 (def filter-pool (make-agent-pool "filter" 5))
 
 (defn process-posts [filters]
-  (defn filter-post [_ post filters]
+  (letfn [(filter-post [_ post filters]
     (doseq [filt filters]
       (if (filter-post? filt post)
 	(save-post filt post)
 	nil)))
-  (defn dequeue-posts [posts filters]
-    (doseq [post posts]
-      (send (agent-from-pool filter-pool) filter-post post filters))
-    (list))
-  (send post-queue dequeue-posts filters))
+	  (dequeue-posts [posts filters]
+			 (doseq [post posts]
+			   (send (agent-from-pool filter-pool) filter-post post filters))
+			 (list))]
+  (send post-queue dequeue-posts filters)))
 
 (def categories '("http://sfbay.craigslist.org/eng/"))
 (def filters (list (make-filter "simple" '("the"))
